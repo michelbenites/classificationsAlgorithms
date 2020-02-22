@@ -1,0 +1,370 @@
+---
+title: "Testing many classification algorithms"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(MASS)
+library(class)
+library(ggplot2)
+library(e1071)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+assess.prediction=function(truth,predicted) {
+   # same length:
+   if ( length(truth) != length(predicted) ) {
+     stop("truth and predicted must be same length!")
+   }
+   # check for missing values (we are going to 
+   # compute metrics on non-missing values only)
+   bKeep = ! is.na(truth)  & ! is.na(predicted)
+   predicted = predicted[ bKeep ]
+   truth = truth[ bKeep ]
+   # only 0 and 1:
+   if ( sum(truth%in%c(0,1))+sum(predicted%in%c(0,1))!=2*length(truth) ) {
+     stop("only zeroes and ones are allowed!")
+   }
+   cat("Total cases that are not NA: ",
+         length(truth),"\n",sep="") 
+   # overall accuracy of the test: how many cases 
+   # (both positive and 
+   # negative) we got right:
+   cat("Correct predictions (accuracy): ",
+     sum(truth==predicted),
+     "(",signif(sum(truth==predicted)*100/
+     length(truth),3),"%)\n",sep="")
+   # how predictions align against known 
+   # training/testing outcomes:
+   # TP/FP= true/false positives, 
+   # TN/FN=true/false negatives
+   TP = sum(truth==1 & predicted==1)
+   TN = sum(truth==0 & predicted==0)
+   FP = sum(truth==0 & predicted==1)
+   FN = sum(truth==1 & predicted==0)
+   P = TP+FN  # total number of
+         # positives in the truth data
+   N = FP+TN  # total number of
+              # negatives
+   cat("TP, TN, FP, FN, P, N:",TP, TN, FP, FN, P, N, fill=TRUE)
+   cat("TPR (sensitivity)=TP/P: ",
+       signif(100*TP/P,3),"%\n",sep="")
+   cat("TNR (specificity)=TN/N: ",
+       signif(100*TN/N,3),"%\n",sep="")
+   cat("PPV (precision)=TP/(TP+FP): ",
+       signif(100*TP/(TP+FP),3),"%\n",sep="")
+   cat("FDR (false discovery)=1-PPV: ",
+       signif(100*FP/(TP+FP),3),"%\n",sep="")
+   cat("FPR =FP/N=1-TNR: ",
+      signif(100*FP/N,3),"%\n",sep="")
+}
+```
+
+
+## Introduction
+
+Comparing several classifications algorithms. For this test I will use banknote authentication data to fit logistics regression model and evaluate performance of LDA, QDA and KNN classifiers.  
+
+## Logistic Regression
+
+
+```{r banknoteslogregress}
+# Get information from dataset
+banknote <- read.table("data\\data_banknote_authentication.txt", sep = ",")
+# Naming the columns
+colnames(banknote) <- c("variance","skewness" , "curtosis", "entropy", "classoutcome")
+
+# Fitting logistic regression model.
+logreg.mdl <- glm(classoutcome ~ ., data = banknote, family = binomial)
+
+# Model summary
+summary(logreg.mdl)
+
+# Predicting the model
+logreg.pred <- predict(logreg.mdl, newdata = banknote[, 1:4], type = "response")
+
+# Converting the probabilities into 0 or 1
+logreg.out  <- ifelse(logreg.pred>0.5, 1, 0)
+
+# Matrix Confusion
+mconf.logres <- table(Predict=logreg.out, original=banknote$classoutcome)
+mconf.logres
+
+# sensitivity 
+mconf.logres[2,2] / sum(mconf.logres[,2])
+# specificity
+mconf.logres[1,1] / sum(mconf.logres[,1])
+
+# Error rate
+mean(logreg.out!=banknote$classoutcome)
+```
+
+**The independent variables variance, skewness and kurtosis seem to be the most significant for the model, all have a very low p value, while the entropy variable has a value above 0.05.**
+**The results of the performance were excellent, because we are using the same dataset to create and predict the model, this makes all indicators very good. Sensitivity and Specificity were very high as well as acuracy. And the error rate was very low.** 
+
+
+## LDA and QDA
+
+```{r banknoteldaqda}
+# Fitting lda/qda model.
+lda.mdl <- lda(classoutcome ~ ., data = banknote)
+qda.mdl <- qda(classoutcome ~ ., data = banknote)
+
+# Predicting on entire dataset
+lda.pred <- predict(lda.mdl, newdata = banknote)
+qda.pred <- predict(qda.mdl, newdata = banknote)
+
+# Confusion Matrix
+mconf.lda <- table(predict = lda.pred$class, original=banknote$classoutcome) 
+mconf.qda <- table(predict = qda.pred$class, original=banknote$classoutcome) 
+
+# Printing Matrixes
+mconf.lda
+mconf.qda
+
+#### sensitivity 
+## LDA
+mconf.lda[2,2] / sum(mconf.lda[,2])
+## QDA
+mconf.qda[2,2] / sum(mconf.qda[,2])
+
+#### specificity
+## LDA
+mconf.lda[1,1] / sum(mconf.lda[,1])
+## QDA
+mconf.qda[1,1] / sum(mconf.qda[,1])
+
+#### Error rate
+## LDA
+mean(lda.pred$class!=banknote$classoutcome)
+## QDA
+mean(qda.pred$class!=banknote$classoutcome)
+
+```
+**The LDA and QDA classifiers showed slightly better values of sensitivity than logistic regression, all positive values were correctly predicted, so no true event was missed. However for specificity and error rate the numbers were worse. Indicating a higher number of false positives than in the previous classifier.**
+
+## KNN
+
+```{r banknoteknn}
+idxk = c(1, 7, 23)
+
+
+for (i in idxk) {
+  cat("**** KNN with K =", i, "****","\n")
+  knn.pred <- knn(train = banknote[1:4], test = banknote[,1:4], cl = banknote$classoutcome, k = i )
+  
+  
+  print("Confusion Matrix")
+  mconf.knn <- table(predict=knn.pred, original = banknote$classoutcome)
+  print(mconf.knn)
+  
+  print("Sensitivity")
+  print(mconf.knn[2,2] / sum(mconf.knn[,2]))
+  
+  print("specificity")
+  print(mconf.knn[1,1] / sum(mconf.knn[,1]))
+
+  print("Error Rate")
+  print(mean(knn.pred!=banknote$classoutcome))
+
+}
+```
+
+**KNN had 100% accuracy, sensitivity = 1 and specificity = 1 for K = 1 and K = 7. In the case of K = 1 there is no surprise since in this case we are considering only 1 neighbor, of course in this case the error rate it would be 0 in the training dataset. However in this case we will have a low bias and a high variance. K = 23 has very good indicators compared to the other methods above.**
+
+## Comparing test errors of logistic regression, LDA, QDA and KNN
+
+
+Bootstrap validation function
+```{r bootstrapvalidationfunction}
+bootrescomparison <- function (ntries, inpmethod, nbvar=4) {
+  
+  dftemp <- NULL
+
+  for (itries in 1:ntries) {
+    bdata     <- sample(nrow(banknote), nrow(banknote), replace = TRUE)
+    btrain    <- banknote[bdata,]
+
+    btrain$classoutcome <- as.factor(btrain$classoutcome) 
+
+    btest     <- banknote[-bdata,]
+    btest.out <- banknote[-bdata,"classoutcome"]
+  
+    for (imethod in inpmethod) {
+      gen.predi <- NULL
+      if (imethod == "lr") {
+      
+        gen.model <- glm(classoutcome ~ ., data = btrain, family = binomial)
+        gen.predi <- ifelse(predict(gen.model, btest, type = "response")>0.5,1,0)
+      } 
+      else if (imethod == "lda") {
+        gen.model <- lda(classoutcome ~ ., data = btrain, family = binomial)
+        gen.predi <- predict(gen.model, btest)$class
+      }
+      else if (imethod == "qda") {
+        gen.model <- lda(classoutcome ~ ., data = btrain, family = binomial)
+        gen.predi <- predict(gen.model, btest)$class
+      }
+      ## The others are KNN 1..101 
+      else if (substr(imethod,1,1)=="k")
+      {
+        
+        # Get numeric part of imethod. i.e. "K40" -> "40"
+        i <- as.numeric(substr(imethod, 2, nchar(imethod)))
+        gen.predi <- knn(train = btrain[,1:4], test = btest[,1:4], cl = btrain$classoutcome, k = i )
+  
+      }
+      
+      else if (imethod == "nb") {
+        cols          <- colnames(btrain[,1:nbvar])
+        cols[nbvar+1] <- c("classoutcome")
+        gen.model <- naiveBayes(classoutcome ~ ., data = btrain[,cols])
+        gen.predi <- predict(gen.model, btest[,1:nbvar])
+      }
+      
+      if (!is.null(gen.predi)) {
+    
+        # Confusion Matrix
+        gen.mconf <- table(predict=gen.predi, truth=btest.out)
+        gen.mconf
+          
+        # sensitivity 
+        sen <- gen.mconf[2,2] / sum(gen.mconf[,2])
+        # specificity
+        spe <- gen.mconf[1,1] / sum(gen.mconf[,1])
+        # Error rate
+        err       <- mean(gen.predi!=btest.out)
+          
+        dftemp <- rbind(dftemp, data.frame(method=imethod, sensitivity=sen, specificity=spe, error=err))
+
+        }
+      
+      } 
+    
+  }
+  dftemp
+  
+}  
+
+```
+
+
+```{r banknotecomparison, warning=FALSE}
+# Select the methods
+method <- c("lr", "lda", "qda", "k1", "k2","k5","k11","k21","k51","k101")
+
+# Get the result of the function 
+df.out <- bootrescomparison (50, method, 2)
+
+# Plot the results
+old.par <- par(mfrow=c(1,3))
+ggplot(df.out, aes(x=factor(method), y=sensitivity, colour = method)) + geom_boxplot()
+ggplot(df.out, aes(x=factor(method), y=specificity, colour = method)) + geom_boxplot()
+ggplot(df.out, aes(x=factor(method), y=error, colour = method)) + geom_boxplot()
+par(old.par)
+```
+
+**Considering the several tests performed, it is possible to verify that the logistic regression and knn presented the best performances. LDA and QDA had good performance in sensitivity, but they had worse results in specificty and error rate. It is also worth commenting that Knn with K> 21 did not perform well.**
+
+## Naive Bayes classifier
+
+```{r banknotenaivebayes, warning=FALSE}
+ntries <- 50
+
+# Adding NaiveBayes method 
+method <- c("lr", "lda", "qda", "k1", "k2","k5","k11","k21","k51","k101", "nb")
+
+# Get the results
+df.out <- bootrescomparison(ntries, method)
+
+# Plot the methods
+ggplot(df.out, aes(x=factor(method), y=sensitivity, colour = method)) + geom_boxplot()
+ggplot(df.out, aes(x=factor(method), y=specificity, colour = method)) + geom_boxplot()
+ggplot(df.out, aes(x=factor(method), y=error, colour = method)) + geom_boxplot()
+
+```
+
+**The plots showed that Naive Bayes is not the best option to use as a classifier in this dataset.**
+**The Naive Bayes classifier did not perform well, it had a worse rating on practically all metrics when compared to other methods, especially with respect to the error rate that is very far from the others.**
+
+```{r banknotenaivebayesanalysis}
+bdata.tmp     <- sample(nrow(banknote), nrow(banknote), replace = TRUE)
+btrain.tmp    <- banknote[bdata.tmp,]
+
+btrain.tmp$classoutcome <- as.factor(btrain.tmp$classoutcome) 
+
+btest.tmp     <- banknote[-bdata.tmp,]
+btest.out.tmp <- banknote[-bdata.tmp,"classoutcome"]
+
+nb.model <- naiveBayes(classoutcome ~ variance + skewness, data = btrain.tmp)
+nb.predi <- predict(nb.model, btest.tmp[,1:4])
+
+# NaiveBayes metrics.
+assess.prediction(btest.out.tmp, nb.predi)
+
+# Pairs of banknote dataset
+pairs(banknote[,colnames(banknote)!="classoutcome"], col=as.factor(banknote$classoutcome))
+
+# Transforming class in numeric in order to see the correlations
+banknote.cor <- banknote
+banknote.cor$classoutcome <- as.numeric(banknote.cor$classoutcome)
+cor(banknote.cor)
+```
+
+**It was also identified that the metrics for NaiveBayes, despite being good indicators in other situations, performed worse than the previous ones. Comparing the scatterplot and the correlations we can verify a dependence between variables, this it is not good for Naive Bayes classifier. So I selected the two most significant variables to compare decision limits between methods.**  
+
+
+``` {r banknotegridanalysis, fig.height=15 , fig.width=12}
+# Preparing to show the behaviour of the methods
+xgrid <- seq(-18, 18, by=0.1)
+grid2d <- cbind(rep(xgrid, length(xgrid)),sort(rep(xgrid,length(xgrid))))
+colnames(grid2d)<-c("variance", "skewness")
+
+
+#old.par <-par( mfrow=c(3,2), ps=16, mar=c(4, 4.5, 2, 0.5))
+old.par <-par( mfrow=c(3,2))
+
+method.tmp <- c("NBayes", "LDA", "QDA", "KNN(1)", "KNN(21)", "KNN(101)")
+
+# Loop to plot the methods
+for (imet in method.tmp) {
+  if (imet == "NBayes") {
+    gen.model.tmp <- naiveBayes(btrain.tmp[,1:2], btrain.tmp$classoutcome)
+    gen.predi.tmp <- predict(gen.model.tmp, newdata = grid2d)
+    grid.pred <- as.numeric(gen.predi.tmp)
+  }
+  else if (imet == "LDA") {
+    gen.model.tmp <- lda(btrain.tmp[,1:2], btrain.tmp$classoutcome)
+    gen.predi.tmp <- predict(gen.model.tmp, newdata = grid2d)
+    grid.pred <- as.numeric(gen.predi.tmp$class)
+  }
+  else if (imet == "QDA") {
+    gen.model.tmp <- qda(btrain.tmp[,1:2], btrain.tmp$classoutcome)
+    gen.predi.tmp <- predict(gen.model.tmp, newdata = grid2d)
+    grid.pred <- as.numeric(gen.predi.tmp$class)
+  }
+  else if (imet == "KNN(1)") {
+    gen.predi.tmp <- knn(btrain.tmp[,1:2], grid2d, btrain.tmp$classoutcome, k = 1)
+    grid.pred <- as.numeric(gen.predi.tmp)
+  }
+  else if (imet == "KNN(21)") {
+    gen.predi.tmp <- knn(btrain.tmp[,1:2], grid2d, btrain.tmp$classoutcome, k = 1)
+    grid.pred <- as.numeric(gen.predi.tmp)
+  }
+  else if (imet == "KNN(101)") {
+    gen.predi.tmp <- knn(btrain.tmp[,1:2], grid2d, btrain.tmp$classoutcome, k = 101)
+    grid.pred <- as.numeric(gen.predi.tmp)
+  }
+
+
+  plot(btrain.tmp[,1], btrain.tmp[,2], xlab = "variance", ylab = "skewness", col=c("lightblue", "orange")[as.numeric(btrain.tmp$classoutcome)], pch=c(19,17)[as.numeric(btrain.tmp$classoutcome)], main = imet)
+  points(grid2d, col=c("lightblue", "orange")[grid.pred], pch=1, cex=0.1)
+}
+par(old.par)
+
+```
+
+**The two most relevant variables for this comparison were used. Analyzing the limits that define each of the classes we can see that Naive Bayes really has a worse performance, it can not correctly classify more points than the others. This performance should intensify when used in a completely new database.**
